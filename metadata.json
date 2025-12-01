@@ -1,0 +1,5 @@
+{
+  "name": "Bravo Forms",
+  "description": "A powerful team-based form builder application with role-based access control (Manager, Editor, Viewer). Create, manage, and share forms securely within your organization.",
+  "requestFramePermissions": []
+}

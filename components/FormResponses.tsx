@@ -1,0 +1,354 @@
+
+import React, { useState, useEffect, useMemo } from 'react';
+import { Form, FormResponse, FieldType, User, UserRole } from '../types';
+import { getResponsesByFormId, getSystemConfig } from '../services/mockService';
+import { ArrowLeft, Search, Download, Database, Filter, Calendar, Sparkles, Hash, Type, AlignLeft, CheckSquare, List, PenTool, UploadCloud, Grid, FileCode, X, Copy } from 'lucide-react';
+
+interface FormResponsesProps {
+  user: User;
+  form: Form;
+  onClose: () => void;
+}
+
+const FormResponses: React.FC<FormResponsesProps> = ({ user, form, onClose }) => {
+  const [responses, setResponses] = useState<FormResponse[]>([]);
+  const [filterText, setFilterText] = useState('');
+  const [filterDate, setFilterDate] = useState('');
+  
+  // BI Generation State
+  const [generatingTMDL, setGeneratingTMDL] = useState(false);
+  const [showScriptModal, setShowScriptModal] = useState(false);
+  const [generatedSql, setGeneratedSql] = useState('');
+  const [generatedTmdl, setGeneratedTmdl] = useState('');
+
+  const systemConfig = getSystemConfig();
+
+  useEffect(() => {
+    setResponses(getResponsesByFormId(form.id));
+  }, [form]);
+
+  // UseMemo to prevent lag on typing
+  const filtered = useMemo(() => {
+    return responses.filter(r => {
+      const matchesText = filterText === '' || Object.values(r.answers).some(val => 
+        String(val).toLowerCase().includes(filterText.toLowerCase())
+      );
+      
+      let matchesDate = true;
+      if (filterDate) {
+        const d = new Date(r.submittedAt).toISOString().split('T')[0];
+        matchesDate = d === filterDate;
+      }
+      return matchesText && matchesDate;
+    });
+  }, [responses, filterText, filterDate]);
+
+  const exportToCSV = () => {
+    const headers = form.elements.map(el => el.label).join(',');
+    const csvContent = `Data Envio,${headers}\n` + filtered.map(r => {
+        const date = new Date(r.submittedAt).toLocaleDateString();
+        const row = form.elements.map(el => {
+            const val = r.answers[el.id] || '';
+            return `"${String(val).replace(/"/g, '""')}"`;
+        }).join(',');
+        return `${date},${row}`;
+    }).join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${form.title.replace(/\s+/g, '_')}_respostas.csv`;
+    link.click();
+  };
+
+  const generateScripts = () => {
+    setGeneratingTMDL(true);
+    
+    // Simulate AI Generation Delay
+    setTimeout(() => {
+        // 1. Prepare Names
+        const schema = systemConfig.dbConfig.schema || 'public';
+        const safeFormTitle = form.title.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        const viewName = `vw_${safeFormTitle}`;
+        const tableName = `tb_responses`; // Assuming a central table for responses with JSONB
+        
+        // 2. Generate SQL View Script
+        let sqlColumns = [
+            `    r.id AS response_id`,
+            `    r.submitted_at AS data_envio`,
+            `    r.submitted_by AS usuario_id`
+        ];
+
+        form.elements.forEach(el => {
+            const cleanColName = el.label.toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 50);
+            let castType = 'TEXT';
+            
+            if (el.type === FieldType.NUMBER) castType = 'NUMERIC';
+            if (el.type === FieldType.DATE) castType = 'DATE';
+            
+            // JSONB Extraction Logic for Postgres
+            sqlColumns.push(`    (r.answers ->> '${el.id}')::${castType} AS ${cleanColName}`);
+        });
+
+        const sqlScript = `-- Criação da View no Banco de Dados PostgreSQL\n-- Schema: ${schema}\n\nCREATE OR REPLACE VIEW "${schema}"."${viewName}" AS\nSELECT\n${sqlColumns.join(',\n')}\nFROM "${schema}"."${tableName}" r\nWHERE r.form_id = '${form.id}';`;
+
+        setGeneratedSql(sqlScript);
+
+        // 3. Generate TMDL (Power BI)
+        // Now pointing to the Postgres View
+        
+        const tmdlMeasures = [];
+        tmdlMeasures.push(`\t\tmeasure 'Total de Respostas' = COUNTROWS('${viewName}')\n\t\t\tformatString: #,##0`);
+
+        const tmdlColumns = form.elements.map(el => {
+             const cleanColName = el.label.toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 50);
+             let dataType = 'string';
+             
+             if (el.type === FieldType.NUMBER) {
+                 dataType = 'double';
+                 tmdlMeasures.push(`\t\tmeasure 'Total ${el.label}' = SUM('${viewName}'[${cleanColName}])`);
+                 tmdlMeasures.push(`\t\tmeasure 'Média ${el.label}' = AVERAGE('${viewName}'[${cleanColName}])`);
+             } else if (el.type === FieldType.DATE) {
+                 dataType = 'datetime';
+             }
+
+             return `\t\tcolumn ${cleanColName}\n\t\t\tdatatype: ${dataType}\n\t\t\tsourceColumn: "${cleanColName}"\n\t\t\tsummarizeBy: none`;
+        }).join('\n\n');
+
+        const tmdlScript = `
+// Power BI TMDL Generated by Bravo Forms AI
+// Connects to PostgreSQL View: ${schema}.${viewName}
+
+createOrReplace
+\ttable '${viewName}'
+\t\tlineageTag: ${Math.random().toString(36).substr(2)}
+
+${tmdlColumns}
+
+${tmdlMeasures.join('\n\n')}
+
+\t\tpartition 'Partition' = m
+\t\t\tmode: import
+\t\t\tsource = PostgreSQL.Database("${systemConfig.dbConfig.host}", "${systemConfig.dbConfig.schema}", [Query="SELECT * FROM ${schema}.${viewName}"])
+`;
+
+        setGeneratedTmdl(tmdlScript);
+        setGeneratingTMDL(false);
+        setShowScriptModal(true);
+    }, 1500);
+  };
+
+  const copyToClipboard = (text: string) => {
+      navigator.clipboard.writeText(text);
+      alert('Copiado para a área de transferência!');
+  };
+
+  const getHeaderIcon = (type: FieldType) => {
+      switch(type) {
+          case FieldType.TEXT: return <Type size={12} className="mr-1 opacity-70"/>;
+          case FieldType.NUMBER: return <Hash size={12} className="mr-1 opacity-70"/>;
+          case FieldType.DATE: return <Calendar size={12} className="mr-1 opacity-70"/>;
+          case FieldType.CHECKBOX: return <CheckSquare size={12} className="mr-1 opacity-70"/>;
+          case FieldType.SELECT: return <List size={12} className="mr-1 opacity-70"/>;
+          case FieldType.TEXTAREA: return <AlignLeft size={12} className="mr-1 opacity-70"/>;
+          case FieldType.SIGNATURE: return <PenTool size={12} className="mr-1 opacity-70"/>;
+          case FieldType.FILE_UPLOAD: return <UploadCloud size={12} className="mr-1 opacity-70"/>;
+          default: return <Grid size={12} className="mr-1 opacity-70"/>;
+      }
+  };
+
+  return (
+    <div className="flex flex-col h-screen bg-slate-50 relative">
+        
+        {/* Modal for Scripts */}
+        {showScriptModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in p-4">
+                <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden">
+                    <div className="p-4 border-b bg-slate-50 flex justify-between items-center">
+                        <div className="flex items-center">
+                            <div className="bg-orange-100 p-2 rounded-lg mr-3">
+                                <FileCode className="text-orange-600" size={24}/>
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-lg text-slate-800">Engenharia de Dados Automática</h3>
+                                <p className="text-xs text-slate-500">Scripts gerados para o formulário: {form.title}</p>
+                            </div>
+                        </div>
+                        <button onClick={() => setShowScriptModal(false)} className="text-slate-400 hover:text-red-500 transition-colors"><X size={24}/></button>
+                    </div>
+                    
+                    <div className="flex-1 overflow-y-auto p-6 bg-slate-100 space-y-6">
+                        {/* SQL Section */}
+                        <div className="bg-white rounded-xl border border-slate-300 shadow-sm overflow-hidden">
+                            <div className="bg-[#2e303e] px-4 py-2 flex justify-between items-center">
+                                <span className="text-white font-mono text-sm font-bold">PostgreSQL View (DDL)</span>
+                                <button onClick={() => copyToClipboard(generatedSql)} className="text-slate-300 hover:text-white flex items-center text-xs"><Copy size={12} className="mr-1"/> Copiar</button>
+                            </div>
+                            <pre className="p-4 text-xs font-mono bg-[#282a36] text-[#f8f8f2] overflow-x-auto custom-scrollbar">
+                                <code>{generatedSql}</code>
+                            </pre>
+                            <div className="p-3 bg-slate-50 border-t text-xs text-slate-500">
+                                <p>Este script cria uma VIEW no schema <strong>{systemConfig.dbConfig.schema}</strong>, transformando o JSONB em colunas tipadas.</p>
+                            </div>
+                        </div>
+
+                        {/* TMDL Section */}
+                        <div className="bg-white rounded-xl border border-slate-300 shadow-sm overflow-hidden">
+                            <div className="bg-[#f2c811] px-4 py-2 flex justify-between items-center">
+                                <span className="text-black font-mono text-sm font-bold">Power BI (TMDL)</span>
+                                <button onClick={() => copyToClipboard(generatedTmdl)} className="text-black/70 hover:text-black flex items-center text-xs"><Copy size={12} className="mr-1"/> Copiar</button>
+                            </div>
+                            <pre className="p-4 text-xs font-mono bg-white text-slate-800 overflow-x-auto border-b custom-scrollbar">
+                                <code>{generatedTmdl}</code>
+                            </pre>
+                             <div className="p-3 bg-slate-50 text-xs text-slate-500">
+                                <p>Este script TMDL conecta o Power BI diretamente à VIEW criada acima e gera as medidas DAX automaticamente.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {/* Header */}
+        <div className="bg-white border-b px-6 py-4 flex justify-between items-center shadow-sm flex-shrink-0">
+            <div className="flex items-center">
+                <button onClick={onClose} className="text-slate-500 hover:text-blue-900 mr-4 transition-colors">
+                    <ArrowLeft size={20} />
+                </button>
+                <div className="flex items-center">
+                    <div className="bg-green-100 p-2 rounded-lg mr-3 text-green-700">
+                        <Grid size={20} />
+                    </div>
+                    <div>
+                        <h1 className="text-xl font-bold text-slate-800 flex items-center">{form.title}</h1>
+                        <p className="text-xs text-slate-500 uppercase tracking-wider font-bold">Tabela de Dados</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div className="flex space-x-3">
+                 <button 
+                    onClick={exportToCSV}
+                    className="flex items-center px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 font-medium transition-colors"
+                 >
+                    <Download size={16} className="mr-2" /> CSV / Excel
+                 </button>
+
+                 {user.role === UserRole.MASTER && (
+                     <button 
+                        onClick={generateScripts}
+                        disabled={generatingTMDL}
+                        className={`flex items-center px-4 py-2 text-white rounded-lg font-bold shadow-sm transition-all ${generatingTMDL ? 'bg-slate-400 cursor-not-allowed' : 'bg-gradient-to-r from-blue-900 to-blue-700 hover:from-blue-800 hover:to-blue-600'}`}
+                     >
+                        {generatingTMDL ? (
+                            <>
+                                <Database size={16} className="mr-2 animate-pulse" /> Gerando Scripts...
+                            </>
+                        ) : (
+                             <>
+                                <Sparkles size={16} className="mr-2 text-orange-400" /> Gerar Script SQL & BI
+                            </>
+                        )}
+                     </button>
+                 )}
+            </div>
+        </div>
+
+        {/* Filters */}
+        <div className="px-6 py-4 flex-shrink-0 border-b border-slate-200 bg-white">
+            <div className="flex flex-wrap gap-4 items-center">
+                <div className="relative flex-1 min-w-[200px]">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={16} />
+                    <input 
+                        type="text" 
+                        placeholder="Pesquisar em todas as colunas..." 
+                        className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-shadow text-sm"
+                        value={filterText}
+                        onChange={(e) => setFilterText(e.target.value)}
+                    />
+                </div>
+
+                <div className="relative">
+                    <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={16} />
+                    <input 
+                        type="date" 
+                        className="pl-10 pr-4 py-2 border border-slate-300 rounded-lg outline-none focus:border-blue-500 text-slate-600 transition-shadow text-sm"
+                        value={filterDate}
+                        onChange={(e) => setFilterDate(e.target.value)}
+                    />
+                </div>
+
+                <div className="text-xs text-slate-500 ml-auto bg-slate-100 px-3 py-1.5 rounded-full font-medium border border-slate-200">
+                    {filtered.length} linhas
+                </div>
+            </div>
+        </div>
+
+        {/* Table Container - Fixed Height with Scroll */}
+        <div className="flex-1 overflow-hidden flex flex-col relative bg-slate-100 p-6">
+            <div className="bg-white border border-slate-300 rounded-t-lg shadow-sm overflow-hidden flex flex-col h-full ring-1 ring-slate-200">
+                <div className="flex-1 overflow-auto">
+                    <table className="w-full text-left border-collapse">
+                        <thead className="sticky top-0 z-10 shadow-sm">
+                            <tr className="bg-slate-50 border-b-2 border-slate-200 text-slate-600 text-xs uppercase tracking-wider">
+                                <th className="px-4 py-3 font-bold bg-slate-50 border-r border-slate-200 min-w-[150px]">
+                                    <div className="flex items-center">
+                                        <Calendar size={12} className="mr-1 opacity-70"/>
+                                        Data de Envio
+                                    </div>
+                                </th>
+                                {form.elements.map(el => (
+                                    <th key={el.id} className="px-4 py-3 font-bold whitespace-nowrap bg-slate-50 border-r border-slate-200 min-w-[150px]">
+                                        <div className="flex items-center">
+                                            {getHeaderIcon(el.type)}
+                                            {el.label}
+                                        </div>
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 bg-white">
+                            {filtered.length === 0 ? (
+                                <tr>
+                                    <td colSpan={form.elements.length + 1} className="px-6 py-20 text-center text-slate-400">
+                                        <div className="flex flex-col items-center justify-center">
+                                            <Database size={48} className="mb-4 opacity-30 text-slate-300"/>
+                                            <span className="font-medium">Nenhum dado encontrado</span>
+                                            <span className="text-xs mt-1">Tente limpar os filtros</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ) : (
+                                filtered.map(r => (
+                                    <tr key={r.id} className="hover:bg-blue-50/50 transition-colors group">
+                                        <td className="px-4 py-2 text-sm text-slate-600 font-medium whitespace-nowrap border-r border-slate-100 group-hover:border-slate-200">
+                                            {new Date(r.submittedAt).toLocaleDateString()}
+                                            <span className="text-[10px] ml-2 text-slate-400 bg-slate-100 px-1 rounded">{new Date(r.submittedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                        </td>
+                                        {form.elements.map(el => {
+                                            const val = r.answers[el.id];
+                                            return (
+                                                <td key={el.id} className="px-4 py-2 text-sm text-slate-700 border-r border-slate-100 group-hover:border-slate-200 max-w-xs truncate" title={String(val)}>
+                                                    {val === undefined || val === null ? <span className="text-slate-300 italic">Vazio</span> : String(val)}
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+                {/* Footer status bar similar to spreadsheet tools */}
+                <div className="bg-slate-50 border-t border-slate-200 px-4 py-1 text-[10px] text-slate-500 font-medium flex justify-between">
+                     <span>Tabela: {form.title}</span>
+                     <span>Total de colunas: {form.elements.length + 1}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+  );
+};
+
+export default FormResponses;
