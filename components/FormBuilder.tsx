@@ -901,9 +901,7 @@ const FormBuilder: React.FC<FormBuilderProps> = ({ user, initialData, onClose })
             <button onClick={() => setShowAddRuleModal(false)} className="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded-lg font-bold">
               Cancelar
             </button>
-            <button onClick={() => { if(currentRule.field && currentRule.value) { setConditionalRules([...conditionalRules, currentRule]); setCurrentRule({field: '', operator: 'equals', value: ''}); setShowAddRuleModal(false); setShowToast({msg: 'Regra adicionada com sucesso!', type: 'success'}); } }} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700">
-              Adicionar Regra
-            </button>
+<button onClick={() => alert('Funcionalidade de regras condicionais - em desenvolvimento')} className="mt-6 px-6 py-2 bg-white border border-slate-300 rounded-lg text-slate-600 font-bold hover:bg-slate-50">Adicionar Regra</button>
           </div>
         </div>
       </div>
