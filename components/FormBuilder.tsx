@@ -66,6 +66,11 @@ const FormBuilder: React.FC<FormBuilderProps> = ({ user, initialData, onClose })
       siteUrl: initialData?.integrations?.sharepoint?.siteUrl || '', 
       listName: initialData?.integrations?.sharepoint?.listName || '' 
   });
+  
+  // Conditional Logic State
+  const [showAddRuleModal, setShowAddRuleModal] = useState(false);
+  const [conditionalRules, setConditionalRules] = useState(initialData?.conditionalRules || []);
+  const [currentRule, setCurrentRule] = useState({ field: '', operator: 'equals', value: '' });
 
   // Drag and Drop State
   const [draggedItemIndex, setDraggedItemIndex] = useState<number | null>(null);
@@ -158,7 +163,8 @@ const FormBuilder: React.FC<FormBuilderProps> = ({ user, initialData, onClose })
       theme,
       createdAt: initialData?.createdAt || Date.now(),
       updatedAt: Date.now(),
-      status: 'publicado'
+      status: 'publicado',
+    conditionalRules
     };
     
     saveForm(newForm);
@@ -860,6 +866,49 @@ const FormBuilder: React.FC<FormBuilderProps> = ({ user, initialData, onClose })
            </div>
        )}
     </div>
+    
+    {/* Add Conditional Rule Modal */}
+    {showAddRuleModal && (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 animate-in zoom-in-95">
+          <h3 className="text-xl font-bold text-slate-800 mb-4 flex items-center">
+            <GitBranch className="mr-2 text-blue-600"/>
+            Adicionar Regra Condicional
+          </h3>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">Campo</label>
+              <select value={currentRule.field} onChange={(e) => setCurrentRule({...currentRule, field: e.target.value})} className="w-full border border-slate-300 rounded-lg p-2 text-sm">
+                <option value="">Selecione um campo</option>
+                {elements.map(el => <option key={el.id} value={el.id}>{el.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">Operador</label>
+              <select value={currentRule.operator} onChange={(e) => setCurrentRule({...currentRule, operator: e.target.value})} className="w-full border border-slate-300 rounded-lg p-2 text-sm">
+                <option value="equals">É igual a</option>
+                <option value="notEquals">Não é igual a</option>
+                <option value="contains">Contém</option>
+                <option value="greaterThan">Maior que</option>
+                <option value="lessThan">Menor que</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">Valor</label>
+              <input type="text" value={currentRule.value} onChange={(e) => setCurrentRule({...currentRule, value: e.target.value})} className="w-full border border-slate-300 rounded-lg p-2 text-sm" placeholder="Digite o valor..." />
+            </div>
+          </div>
+          <div className="flex justify-end mt-6 space-x-2">
+            <button onClick={() => setShowAddRuleModal(false)} className="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded-lg font-bold">
+              Cancelar
+            </button>
+            <button onClick={() => { if(currentRule.field && currentRule.value) { setConditionalRules([...conditionalRules, currentRule]); setCurrentRule({field: '', operator: 'equals', value: ''}); setShowAddRuleModal(false); setShowToast({msg: 'Regra adicionada com sucesso!', type: 'success'}); } }} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700">
+              Adicionar Regra
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
   );
 };
 
