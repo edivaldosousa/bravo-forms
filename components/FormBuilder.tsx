@@ -867,8 +867,7 @@ const FormBuilder: React.FC<FormBuilderProps> = ({ user, initialData, onClose })
        )}
     </div>
     
-    {/* Add Conditional Rule Modal */}
-    {showAddRuleModal && (
+        {showAddRuleModal && (
       <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
         <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 animate-in zoom-in-95">
           <h3 className="text-xl font-bold text-slate-800 mb-4 flex items-center">
